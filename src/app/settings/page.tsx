@@ -40,7 +40,7 @@ export default function SettingsPage() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await api.updateMe({ bio, handle });
+      const res = await api.updateMe(api.capabilities.profileExtras ? { bio, handle } : { handle });
       setUser(res.user);
       toast("✅ Profil enregistré");
     } catch (e) {
@@ -77,7 +77,7 @@ export default function SettingsPage() {
           <label className="field-label">Pseudo</label>
           <input className="field" value={handle} onChange={(e) => setHandle(e.target.value)} maxLength={20} />
         </div>
-        <div style={{ padding: "0 16px 14px" }}>
+        <div style={{ padding: "0 16px 14px", display: api.capabilities.profileExtras ? "block" : "none" }}>
           <label className="field-label">Bio</label>
           <textarea
             className="field"
@@ -95,7 +95,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-group">
+      <div className="settings-group" style={{ display: api.capabilities.profileExtras ? "block" : "none" }}>
         <div className="sg-title">Confidentialité</div>
         <div className="settings-row">
           <div className="sr-text">

@@ -1,4 +1,7 @@
-# pump.social — frontend web (Next.js)
+# pump.social
+
+Frontend web **Next.js** (racine du dépôt) + backend **Node.js/Fastify**
+(`backend/`, lancé avec Docker Compose avec Postgres et MinIO).
 
 Réseau social crypto sur **Solana** où l'on « pump » les posts en SOL pour
 prolonger leur durée de vie et grimper dans deux classements (posts /
@@ -15,12 +18,132 @@ créateurs). Ce dépôt porte le prototype `MVP.html` vers un vrai projet
 
 ```bash
 npm install
-cp .env.example .env.local   # les défauts sont sûrs (devnet + store local)
-npm run dev                  # http://localhost:3000
+cp .env.local.example .env.local   # les défauts sont sûrs (devnet + store local)
+npm run dev                        # http://localhost:3000
 ```
 
 L'app tourne immédiatement, feed pré-rempli (données seed), **sans base de
 données à provisionner** : le store local suffit pour développer/tester.
+
+## Backend local (Docker Desktop · Windows 10)
+
+Le stack `docker-compose.yml` (racine) lance **Postgres**, **MinIO** (stockage
+S3 des médias) et l'**API** (`backend/`). Le même fichier servira tel quel sur le
+VPS : on n'y ajoutera qu'un reverse proxy HTTPS.
+
+| Service | URL locale | Rôle |
+| --- | --- | --- |
+| API | http://localhost:4000 | REST (auth wallet, posts, pumps, classements) — `GET /health` |
+| MinIO | http://localhost:9000 | upload direct des médias + URLs publiques |
+| Console MinIO | http://localhost:9001 | interface web (login = `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
+| Postgres | `localhost:5432` | base (pour un client SQL, facultatif) |
+
+Tous les ports sont liés à `127.0.0.1` : rien n'est visible depuis ton réseau.
+
+### 1. Premier lancement (PowerShell, dans le dossier du dépôt)
+
+Pré-requis : Docker Desktop démarré (moteur WSL2).
+
+```powershell
+cd C:\chemin\vers\pump.social
+git pull
+
+# Config du stack : copier le modèle puis le compléter
+Copy-Item .env.example .env
+notepad .env
+```
+
+Dans `.env`, change au minimum :
+- `POSTGRES_PASSWORD` et `MINIO_ROOT_PASSWORD` (8 caractères min. pour MinIO) ;
+- `JWT_SECRET` : 32 caractères aléatoires minimum. Pour en générer un :
+  ```powershell
+  $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+  ```
+- `PLATFORM_WALLET` : un wallet **devnet** à toi (il reçoit les 30 %).
+
+Puis :
+
+```powershell
+docker compose up -d --build     # 1er build : quelques minutes
+docker compose ps                # les 3 services doivent être "Up", l'API "(healthy)"
+Invoke-RestMethod http://localhost:4000/health   # → ok=True db=True storage=True geo=True
+```
+
+Au démarrage, l'API applique les migrations SQL, crée le bucket MinIO et charge
+la base de géoloc IP (téléchargée au build).
+
+### 2. Brancher le frontend sur ce backend
+
+Dans **`.env.local`** (frontend), ajoute **une ligne** :
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:4000
+```
+
+puis relance `npm run dev`. C'est tout : le wallet plateforme et le ratio 70/30
+sont lus depuis le backend (`GET /config`), le RPC reste devnet. Pour revenir
+aux données de démo (mode preview Vercel), vide ou commente cette ligne.
+
+Pour tester connexion, post et pump : Phantom (ou autre) en **Devnet**, avec du
+SOL de test ([faucet.solana.com](https://faucet.solana.com)).
+
+### 3. Au quotidien
+
+```powershell
+docker compose ps                    # état des services
+docker compose logs -f api           # logs de l'API en direct (Ctrl+C pour quitter)
+docker compose logs --tail 100 minio # 100 dernières lignes d'un service
+docker compose stop                  # tout arrêter (données conservées)
+docker compose start                 # relancer après un stop
+docker compose restart api           # redémarrer l'API seule
+docker compose up -d --build api     # reconstruire l'API après un git pull
+docker compose down                  # arrêter + supprimer les conteneurs (données conservées)
+```
+
+⚠️ `docker compose down -v` **efface les volumes** (base + médias) : repartir de zéro.
+
+Outils :
+
+```powershell
+docker compose exec postgres psql -U pump -d pump   # console SQL (\q pour quitter)
+docker compose exec api npm run purge               # lancer la purge des posts expirés maintenant
+docker compose exec api npm run rebuild-aggregates  # recalculer tous les totaux depuis la table pumps
+docker compose build --no-cache api                 # rebuild complet (rafraîchit aussi la base de géoloc)
+```
+
+### Tests du backend
+
+```powershell
+cd backend
+npm install
+npm test                 # tests unitaires (sans Docker)
+node test/e2e.mjs        # bout en bout contre le stack lancé (auth, upload, pumps on-chain, classements)
+```
+
+Le test de bout en bout envoie de vraies transactions devnet : si le faucet
+public refuse l'airdrop, fournis un wallet devnet approvisionné (≥ 2 SOL, fichier JSON au
+format `solana-keygen`) :
+
+```powershell
+$env:PUMPER_KEYPAIR = "C:\chemin\vers\keypair-devnet.json"; node test/e2e.mjs
+```
+
+### À propos de MinIO
+
+Depuis 2025, MinIO ne publie plus d'image Docker ni de binaire pour son édition
+communautaire (l'image `minio/minio` n'est plus téléchargeable publiquement).
+Le compose utilise **`pgsty/minio`**, des builds communautaires du même code
+source MinIO maintenus par le projet Pigsty, épinglés sur une release précise.
+L'API ne parle que le protocole S3 standard : pour changer d'implémentation
+(RustFS, SeaweedFS, S3 managé…), il suffit de changer `MINIO_IMAGE` ou le service
+dans le compose, sans toucher au code.
+
+La géolocalisation IP utilise **DB-IP Lite** (CC BY 4.0, attribution « IP
+Geolocation by DB-IP » à afficher dans les mentions légales), téléchargée au
+build. Aucune API externe n'est appelée, et l'IP n'est jamais stockée.
+
+Détails de l'API, des choix de modèle et de la vérification on-chain :
+[`backend/README.md`](backend/README.md).
 
 ## Stack & décisions structurantes
 
@@ -56,7 +179,7 @@ npm run db:seed   # applique le schéma + seed initial
 Base déjà existante : `npm run db:setup` applique aussi les migrations (idempotent,
 sans perte de données).
 
-## Configuration (`.env`)
+## Configuration du frontend (`.env.local`)
 
 | Variable | Rôle |
 | --- | --- |

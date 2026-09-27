@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal } from "../Modal";
 import { Avatar } from "../Avatar";
 import { useUI } from "@/context/UIContext";
@@ -7,6 +7,7 @@ import { useSession } from "@/context/SessionContext";
 import { usePump } from "@/hooks/usePump";
 import { quotePump } from "@/lib/pump";
 import { resolvedSplitBps } from "@/lib/pump-config";
+import { api } from "@/lib/api";
 import { fmtSol } from "@/lib/format";
 import { IS_MAINNET } from "@/lib/solana";
 
@@ -18,11 +19,20 @@ export function PumpModal() {
   const { runPump, canSign } = usePump();
   const [amount, setAmount] = useState(0.1);
   const [phase, setPhase] = useState<"form" | "sending" | "success">("form");
+  const [split, setSplit] = useState(() => resolvedSplitBps());
+
+  // Show the ratio the data source will actually enforce.
+  useEffect(() => {
+    api
+      .pumpConfig()
+      .then((c) => setSplit({ creatorBps: c.creatorBps, founderBps: c.platformBps }))
+      .catch(() => {});
+  }, []);
 
   if (!pumpTarget) return null;
   const post = pumpTarget;
-  const { creatorBps, founderBps } = resolvedSplitBps();
-  const quote = quotePump(amount > 0 ? amount : 0);
+  const { creatorBps, founderBps } = split;
+  const quote = quotePump(amount > 0 ? amount : 0, founderBps);
 
   const confirm = async () => {
     if (amount <= 0) return;

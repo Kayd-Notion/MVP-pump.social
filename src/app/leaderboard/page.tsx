@@ -37,7 +37,10 @@ export default function LeaderboardPage() {
 
   // Default the country selector to the viewer's IP-derived country.
   useEffect(() => {
-    api.geo().then((r) => setCountry(r.country)).catch(() => {});
+    api
+      .geo()
+      .then((r) => r.country && setCountry(r.country))
+      .catch(() => {});
   }, []);
 
   const params = useCallback(

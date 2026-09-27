@@ -24,12 +24,16 @@ export function usePump() {
       if (!publicKey || !sendTransaction) {
         throw new Error("Wallet non connecté.");
       }
+      // Recipients + ratio from the data source, so the transaction always
+      // matches what the backend verifies.
+      const cfg = await api.pumpConfig();
       const result = await sendPump({
         connection,
         payer: publicKey,
         creatorWallet: post.author.wallet,
         amountSol,
         sendTransaction,
+        target: { platformWallet: cfg.platformWallet, platformBps: cfg.platformBps },
       });
       const { post: updated } = await api.recordPump(post.id, {
         amount: amountSol,

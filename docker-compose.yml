@@ -1,0 +1,97 @@
+# pump.social backend stack: Postgres + MinIO (S3) + API.
+#
+#   cp .env.example .env      # then edit secrets
+#   docker compose up -d --build
+#
+# Written to run as-is on the future VPS: only a reverse proxy (HTTPS) is added
+# in front of `api` (and of `minio` for public media). Every port below is bound
+# to 127.0.0.1, so nothing is reachable from the network except through that
+# proxy (locally: only from your own PC).
+
+name: pump-social
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pump}
+      POSTGRES_USER: ${POSTGRES_USER:-pump}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # For a local SQL client (DBeaver, psql…). Remove on the VPS if unused.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    # Upstream stopped publishing MinIO community images/binaries in 2025; this
+    # is a community-maintained build of the same server (see README). Any
+    # S3-compatible image can be swapped in via MINIO_IMAGE.
+    image: ${MINIO_IMAGE:-pgsty/minio:RELEASE.2026-08-04T00-00-00Z}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      # Browsers upload media directly to MinIO: allow the frontend origin.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${CORS_ORIGINS:-http://localhost:3000}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "127.0.0.1:${MINIO_HOST_PORT:-9000}:9000" # S3 API + public media URLs
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001" # web console
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started # the API retries until MinIO answers
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "4000"
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Database (standard libpq variables — no URL-encoding of the password).
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-pump}
+      PGUSER: ${POSTGRES_USER:-pump}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      # Auth
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-604800}
+      NONCE_TTL_SECONDS: ${NONCE_TTL_SECONDS:-300}
+      AUTH_DOMAIN: ${AUTH_DOMAIN:-pump.social}
+      # Solana
+      SOLANA_CLUSTER: ${SOLANA_CLUSTER:-devnet}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      PLATFORM_WALLET: ${PLATFORM_WALLET:?Set PLATFORM_WALLET in .env}
+      PUMP_CREATOR_BPS: ${PUMP_CREATOR_BPS:-7000}
+      PUMP_MAX_TX_AGE_SECONDS: ${PUMP_MAX_TX_AGE_SECONDS:-900}
+      # Object storage: API → MinIO over the Docker network; browsers → public URL.
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:9000}
+      S3_BUCKET: ${S3_BUCKET:-pump-media}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MEDIA_MAX_BYTES: ${MEDIA_MAX_BYTES:-26214400}
+      # Expiry / purge
+      PURGE_INTERVAL_SECONDS: ${PURGE_INTERVAL_SECONDS:-300}
+      KEEP_TOP_N: ${KEEP_TOP_N:-100}
+      # Geolocation
+      DEV_DEFAULT_COUNTRY: ${DEV_DEFAULT_COUNTRY:-}
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-4000}:4000"
+
+volumes:
+  pgdata:
+  miniodata:

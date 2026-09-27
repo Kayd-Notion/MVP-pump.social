@@ -18,7 +18,7 @@ export default function FeedPage() {
   const { openComposer, dataVersion } = useUI();
   const [tab, setTab] = useState("foryou");
   const [posts, setPosts] = useState<ClientPost[]>([]);
-  const [cursor, setCursor] = useState<number | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [done, setDone] = useState(false);
   const sentinel = useRef<HTMLDivElement>(null);

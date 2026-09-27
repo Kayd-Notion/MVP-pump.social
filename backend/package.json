@@ -1,0 +1,38 @@
+{
+  "name": "pump-social-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "migrate": "node dist/cli/migrate.js",
+    "purge": "node dist/cli/purge.js",
+    "rebuild-aggregates": "node dist/cli/rebuild-aggregates.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "geoip:update": "node scripts/fetch-geoip.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
+    "@aws-sdk/s3-presigned-post": "^3.1141.0",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "bs58": "^6.0.0",
+    "fastify": "^5.12.5",
+    "jose": "^6.2.12",
+    "maxmind": "^5.0.7",
+    "postgres": "^3.4.9",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@solana/web3.js": "^1.99.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
+}

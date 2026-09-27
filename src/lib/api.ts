@@ -4,10 +4,10 @@ import type {
   ClientPost,
   ClientPumper,
   ClientUser,
-  LeaderboardCreatorItem,
-  LeaderboardPeriod,
-  LeaderboardPostItem,
 } from "./client-types";
+import type { Api, LeaderboardPage, LeaderboardParams, ProfilePage } from "./api-types";
+import { FOUNDER_WALLET, resolvedSplitBps } from "./pump-config";
+import { backendApi, BACKEND_URL } from "./backend-api";
 
 /** Thin fetch wrapper: JSON, credentials, and typed errors. */
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -23,79 +23,63 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export const api = {
+/** Data source #1: this Next.js app's own API routes (/api/*). */
+const nextApi: Api = {
+  mode: "next",
+  capabilities: { comments: true, profileExtras: true },
+
   // Auth
-  nonce: (wallet: string) =>
-    req<{ message: string; nonce: string; issuedAt: number }>(
-      `/api/auth/nonce?wallet=${encodeURIComponent(wallet)}`,
-    ),
-  verify: (wallet: string, signature: string) =>
-    req<{ user?: ClientUser; needsOnboarding?: boolean; wallet?: string }>(
-      "/api/auth/verify",
-      { method: "POST", body: JSON.stringify({ wallet, signature }) },
-    ),
-  me: () =>
-    req<{ user: ClientUser | null; needsOnboarding?: boolean; wallet?: string }>("/api/auth/me"),
-  logout: () => req<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  nonce: (wallet) => req<{ message: string }>(`/api/auth/nonce?wallet=${encodeURIComponent(wallet)}`),
+  verify: (wallet, signature) =>
+    req("/api/auth/verify", { method: "POST", body: JSON.stringify({ wallet, signature }) }),
+  me: () => req("/api/auth/me"),
+  logout: () => req("/api/auth/logout", { method: "POST" }),
 
   // Users
-  onboard: (handle: string, bio?: string) =>
-    req<{ user: ClientUser }>("/api/users", {
-      method: "POST",
-      body: JSON.stringify({ handle, bio }),
-    }),
-  updateMe: (patch: Partial<Pick<ClientUser, "bio" | "handle" | "hidePumpHistory" | "anonymizePumps">>) =>
-    req<{ user: ClientUser }>("/api/users/me", {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
-  profile: (handle: string) =>
-    req<{
-      user: ClientUser;
-      postsCount: number;
-      active: ClientPost[];
-      expiredCount: number;
-    }>(`/api/users/${encodeURIComponent(handle)}`),
+  onboard: (handle, bio) =>
+    req<{ user: ClientUser }>("/api/users", { method: "POST", body: JSON.stringify({ handle, bio }) }),
+  updateMe: (patch) =>
+    req<{ user: ClientUser }>("/api/users/me", { method: "PATCH", body: JSON.stringify(patch) }),
+  profile: (handle) => req<ProfilePage>(`/api/users/${encodeURIComponent(handle)}`),
 
   // Posts
-  feed: (tab: string, before?: number, limit = 20) => {
+  feed: async (tab, cursor, limit = 20) => {
     const p = new URLSearchParams({ tab, limit: String(limit) });
-    if (before) p.set("before", String(before));
-    return req<{ posts: ClientPost[]; nextCursor: number | null }>(`/api/posts?${p}`);
+    if (cursor) p.set("before", cursor);
+    const r = await req<{ posts: ClientPost[]; nextCursor: number | null }>(`/api/posts?${p}`);
+    return { posts: r.posts, nextCursor: r.nextCursor === null ? null : String(r.nextCursor) };
   },
-  createPost: (input: { text: string; mediaUrl?: string | null; mediaType?: string | null }) =>
+  // Arweave via Irys, paid in SOL from the connected wallet.
+  uploadMedia: async (file, walletProvider) => {
+    const { uploadMedia } = await import("./irys");
+    const r = await uploadMedia(file, walletProvider);
+    return { url: r.url, type: r.mediaType };
+  },
+  createPost: ({ text, media }) =>
     req<{ post: ClientPost }>("/api/posts", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ text, mediaUrl: media?.url ?? null, mediaType: media?.type ?? null }),
     }),
-  post: (id: string) =>
-    req<{ post: ClientPost; pumpers: ClientPumper[]; comments: ClientComment[] }>(
-      `/api/posts/${id}`,
-    ),
+  post: (id) =>
+    req<{ post: ClientPost; pumpers: ClientPumper[]; comments: ClientComment[] }>(`/api/posts/${id}`),
 
   // Pump
-  recordPump: (postId: string, input: { amount: number; signature: string; anonymous?: boolean }) =>
-    req<{ post: ClientPost; lifespan: { totalHours: number; remainingMs: number; expired: boolean } }>(
-      `/api/posts/${postId}/pump`,
-      { method: "POST", body: JSON.stringify(input) },
-    ),
+  pumpConfig: async () => {
+    const { creatorBps, founderBps } = resolvedSplitBps();
+    return { platformWallet: FOUNDER_WALLET, creatorBps, platformBps: founderBps };
+  },
+  recordPump: (postId, input) =>
+    req<{ post: ClientPost }>(`/api/posts/${postId}/pump`, { method: "POST", body: JSON.stringify(input) }),
 
   // Comments
-  addComment: (postId: string, text: string) =>
+  addComment: (postId, text) =>
     req<{ comments: ClientComment[] }>(`/api/posts/${postId}/comments`, {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
 
   // Leaderboard
-  leaderboard: <K extends "posts" | "creators">(params: {
-    kind: K;
-    scope: "world" | "country";
-    period: LeaderboardPeriod;
-    country?: string;
-    cursor?: string | null;
-    limit?: number;
-  }) => {
+  leaderboard: <K extends "posts" | "creators">(params: LeaderboardParams<K>) => {
     const p = new URLSearchParams({
       kind: params.kind,
       scope: params.scope,
@@ -104,15 +88,14 @@ export const api = {
     });
     if (params.country) p.set("country", params.country);
     if (params.cursor) p.set("cursor", params.cursor);
-    return req<{
-      kind: K;
-      scope: string;
-      period: LeaderboardPeriod;
-      country: string | null;
-      items: K extends "creators" ? LeaderboardCreatorItem[] : LeaderboardPostItem[];
-      nextCursor: string | null;
-    }>(`/api/leaderboard?${p}`);
+    return req<LeaderboardPage<K>>(`/api/leaderboard?${p}`);
   },
 
   geo: () => req<{ country: string }>("/api/geo"),
 };
+
+/**
+ * The data source the whole UI uses. NEXT_PUBLIC_API_URL set (e.g.
+ * http://localhost:4000) → the standalone backend; otherwise the Next routes.
+ */
+export const api: Api = BACKEND_URL ? backendApi : nextApi;

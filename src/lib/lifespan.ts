@@ -62,3 +62,24 @@ export function lifespanInfo(
   }
   return { totalHours, remainingMs, remainingHours, pct, expired, cls };
 }
+
+/**
+ * Lifespan of a post as the UI should show it: the backend's authoritative
+ * expiry when provided (standalone backend), else computed from the tiers.
+ */
+export function postLifespanInfo(
+  post: { createdAt: number; pumped: number; expiresAt?: number },
+  nowMs: number = Date.now(),
+): LifespanInfo {
+  if (post.expiresAt === undefined) return lifespanInfo(post.createdAt, post.pumped, nowMs);
+  const totalMs = Math.max(1, post.expiresAt - post.createdAt);
+  const remainingMs = post.expiresAt - nowMs;
+  const pct = Math.max(0, Math.min(100, (remainingMs / totalMs) * 100));
+  const expired = remainingMs <= 0;
+  let cls: LifespanInfo["cls"] = "";
+  if (!expired) {
+    if (pct < 15) cls = "critical";
+    else if (pct < 35) cls = "low";
+  }
+  return { totalHours: totalMs / HOUR_MS, remainingMs, remainingHours: remainingMs / HOUR_MS, pct, expired, cls };
+}

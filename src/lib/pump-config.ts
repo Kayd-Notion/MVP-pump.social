@@ -35,11 +35,13 @@ export function resolvedSplitBps(): { creatorBps: number; founderBps: number } {
  * Uses integer lamports arithmetic; the creator absorbs any rounding remainder
  * so the two parts always sum exactly to the input (no lamports created/lost).
  */
-export function splitLamports(totalLamports: number): {
+export function splitLamports(
+  totalLamports: number,
+  founderBps: number = resolvedSplitBps().founderBps,
+): {
   creatorLamports: number;
   founderLamports: number;
 } {
-  const { founderBps } = resolvedSplitBps();
   const founderLamports = Math.floor((totalLamports * founderBps) / 10000);
   const creatorLamports = totalLamports - founderLamports;
   return { creatorLamports, founderLamports };

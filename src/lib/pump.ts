@@ -33,9 +33,19 @@ export interface PumpQuote {
   founderSol: number;
 }
 
-export function quotePump(amountSol: number): PumpQuote {
+/**
+ * Recipients + ratio of a pump. Defaults come from env (lib/pump-config.ts);
+ * with the standalone backend they come from its GET /config, so the
+ * transaction always matches what the backend will verify.
+ */
+export interface PumpTarget {
+  platformWallet: string;
+  platformBps: number;
+}
+
+export function quotePump(amountSol: number, platformBps?: number): PumpQuote {
   const totalLamports = solToLamports(amountSol);
-  const { creatorLamports, founderLamports } = splitLamports(totalLamports);
+  const { creatorLamports, founderLamports } = splitLamports(totalLamports, platformBps);
   return {
     amountSol,
     creatorLamports,
@@ -49,6 +59,8 @@ export interface BuildPumpArgs {
   connection: Connection;
   payer: PublicKey;
   creatorWallet: string;
+  /** Overrides the env-configured platform wallet / split. */
+  target?: PumpTarget;
   amountSol: number;
 }
 
@@ -57,15 +69,17 @@ export async function buildPumpTransaction({
   payer,
   creatorWallet,
   amountSol,
+  target,
 }: BuildPumpArgs): Promise<{ transaction: Transaction; quote: PumpQuote }> {
   if (!(amountSol > 0)) throw new Error("Le montant du pump doit être positif.");
-  if (!FOUNDER_WALLET) {
+  const platformWallet = target?.platformWallet ?? FOUNDER_WALLET;
+  if (!platformWallet) {
     throw new Error("Wallet fondateur non configuré (NEXT_PUBLIC_FOUNDER_WALLET).");
   }
 
   const creator = new PublicKey(creatorWallet);
-  const founder = new PublicKey(FOUNDER_WALLET);
-  const quote = quotePump(amountSol);
+  const founder = new PublicKey(platformWallet);
+  const quote = quotePump(amountSol, target?.platformBps);
 
   const tx = new Transaction();
 

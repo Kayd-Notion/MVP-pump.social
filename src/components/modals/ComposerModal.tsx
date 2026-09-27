@@ -7,7 +7,8 @@ import { useUI } from "@/context/UIContext";
 import { useSession } from "@/context/SessionContext";
 import { usePump } from "@/hooks/usePump";
 import { api } from "@/lib/api";
-import { uploadMedia, mediaTypeOf } from "@/lib/irys";
+import { mediaTypeOf } from "@/lib/irys";
+import type { UploadedMedia } from "@/lib/api-types";
 
 export function ComposerModal() {
   const { closeModal, toast, bumpData } = useUI();
@@ -44,22 +45,20 @@ export function ComposerModal() {
       return;
     }
     try {
-      let mediaUrl: string | null = null;
-      let mediaType: string | null = null;
-
+      let media: UploadedMedia | null = null;
       if (file) {
-        if (!wallet?.adapter) {
+        // Irys needs the wallet to pay in SOL; the standalone backend uses a
+        // presigned upload tied to the session instead.
+        if (api.mode === "next" && !wallet?.adapter) {
           toast("Reconnecte ton wallet pour uploader le média.");
           return;
         }
         setPhase("uploading");
-        const up = await uploadMedia(file, wallet.adapter);
-        mediaUrl = up.url;
-        mediaType = up.mediaType;
+        media = await api.uploadMedia(file, wallet?.adapter);
       }
 
       setPhase("posting");
-      const { post } = await api.createPost({ text: body, mediaUrl, mediaType });
+      const { post } = await api.createPost({ text: body, media });
 
       // Optional initial pump to boost the fresh post.
       const initial = withPump ? parseFloat(pumpAmount) || 0 : 0;
@@ -91,7 +90,9 @@ export function ComposerModal() {
 
   const phaseLabel =
     phase === "uploading"
-      ? "Upload du média sur Arweave…"
+      ? api.mode === "next"
+        ? "Upload du média sur Arweave…"
+        : "Upload du média…"
       : phase === "posting"
         ? "Publication…"
         : phase === "pumping"
@@ -148,7 +149,7 @@ export function ComposerModal() {
           📷 Photo / 🎬 Vidéo
         </button>
         <span className="faint" style={{ fontSize: 12, alignSelf: "center" }}>
-          Upload Arweave payé en SOL
+          {api.mode === "next" ? "Upload Arweave payé en SOL" : "Upload direct (max 25 Mo)"}
         </span>
       </div>
 

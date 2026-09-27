@@ -6,7 +6,7 @@ import { TimeGauge } from "./TimeGauge";
 import { useUI } from "@/context/UIContext";
 import { useSession } from "@/context/SessionContext";
 import { fmtSol, timeAgo } from "@/lib/format";
-import { lifespanInfo } from "@/lib/lifespan";
+import { postLifespanInfo } from "@/lib/lifespan";
 import type { ClientPost } from "@/lib/client-types";
 
 export function PostCard({ post }: { post: ClientPost }) {
@@ -16,7 +16,7 @@ export function PostCard({ post }: { post: ClientPost }) {
   const [liked, setLiked] = useState(false);
   const [reposted, setReposted] = useState(false);
 
-  const expired = lifespanInfo(post.createdAt, post.pumped).expired;
+  const expired = postLifespanInfo(post).expired;
 
   const go = () => router.push(`/post/${post.id}`);
   const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -65,7 +65,7 @@ export function PostCard({ post }: { post: ClientPost }) {
         )}
 
         <div className="post-meta">
-          <TimeGauge createdAt={post.createdAt} pumped={post.pumped} />
+          <TimeGauge createdAt={post.createdAt} pumped={post.pumped} expiresAt={post.expiresAt} />
           <div className="pumped-badge">
             <span className="pb-amount">⚡ {fmtSol(post.pumped)}</span>
             <span className="pb-label">SOL pumpés</span>

@@ -7,7 +7,7 @@ import { useSession } from "@/context/SessionContext";
 import { useUI } from "@/context/UIContext";
 import { api } from "@/lib/api";
 import { fmtSol, timeAgo } from "@/lib/format";
-import { lifespanInfo } from "@/lib/lifespan";
+import { postLifespanInfo } from "@/lib/lifespan";
 import type { ClientComment, ClientPost, ClientPumper } from "@/lib/client-types";
 
 export default function PostDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -54,7 +54,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  const expired = lifespanInfo(post.createdAt, post.pumped).expired;
+  const expired = postLifespanInfo(post).expired;
 
   const submitComment = async () => {
     if (!requireAuth("Connecte ton wallet pour commenter.")) return;
@@ -105,7 +105,13 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
           )}
         </div>
 
-        <div className="dp-text">{post.text}</div>
+        {post.deleted ? (
+          <div className="dp-text faint" style={{ fontStyle: "italic" }}>
+            Ce post a expiré et son contenu a été supprimé.
+          </div>
+        ) : (
+          <div className="dp-text">{post.text}</div>
+        )}
 
         {post.mediaUrl && (
           <div className={`post-media${post.mediaType === "video" ? " video" : ""}`}>
@@ -120,7 +126,7 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
         )}
 
         <div className="post-meta" style={{ marginTop: 12 }}>
-          <TimeGauge createdAt={post.createdAt} pumped={post.pumped} />
+          <TimeGauge createdAt={post.createdAt} pumped={post.pumped} expiresAt={post.expiresAt} />
           <div className="pumped-badge">
             <span className="pb-amount">⚡ {fmtSol(post.pumped)}</span>
             <span className="pb-label">SOL pumpés</span>
@@ -140,7 +146,12 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="pump-btn" style={{ flex: 1, padding: 11 }} onClick={doPump}>
+          <button
+            className="pump-btn"
+            style={{ flex: 1, padding: 11, opacity: post.deleted ? 0.5 : 1 }}
+            onClick={doPump}
+            disabled={post.deleted}
+          >
             ⚡ Pump ce post
           </button>
           <button className="btn" onClick={() => toast("🚩 Signalé (modération — hors scope MVP)")}>
@@ -185,7 +196,14 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
 
       {/* Comments */}
       <div className="section-title">Commentaires</div>
-      <div style={{ padding: "0 16px 12px", display: "flex", gap: 10 }}>
+      {!api.capabilities.comments && (
+        <p className="faint" style={{ padding: "0 16px 16px", fontSize: 13 }}>
+          Les commentaires arrivent bientôt.
+        </p>
+      )}
+      <div
+        style={{ padding: "0 16px 12px", display: api.capabilities.comments ? "flex" : "none", gap: 10 }}
+      >
         <input
           className="field"
           value={commentText}

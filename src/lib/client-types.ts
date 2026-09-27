@@ -21,6 +21,10 @@ export interface ClientPost {
   mediaUrl: string | null;
   mediaType: MediaType | null;
   createdAt: number;
+  /** Authoritative expiry from the backend; absent → computed from tiers. */
+  expiresAt?: number;
+  /** Content purged after expiry (tombstone). */
+  deleted?: boolean;
   pumped: number;
   comments: number;
   reposts: number;
