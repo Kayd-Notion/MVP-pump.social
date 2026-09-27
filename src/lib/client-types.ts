@@ -47,3 +47,21 @@ export interface ClientComment {
   createdAt: number;
   author: { id: string; handle: string; wallet: string };
 }
+
+export type LeaderboardPeriod = "all" | "24h" | "7d" | "30d";
+
+/** Posts-leaderboard row. `post` is null (deleted=true) if its content was removed. */
+export interface LeaderboardPostItem {
+  postId: string;
+  /** SOL pumped — all time, or within the selected period. */
+  total: number;
+  deleted: boolean;
+  post: ClientPost | null;
+  creator: { id: string; handle: string; wallet: string } | null;
+}
+
+export interface LeaderboardCreatorItem {
+  user: ClientUser;
+  /** SOL received — all time, or within the selected period. */
+  total: number;
+}

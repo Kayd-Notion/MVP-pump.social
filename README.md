@@ -53,6 +53,9 @@ DATABASE_URL=postgres://user:pass@host:5432/postgres?sslmode=require
 npm run db:seed   # applique le schéma + seed initial
 ```
 
+Base déjà existante : `npm run db:setup` applique aussi les migrations (idempotent,
+sans perte de données).
+
 ## Configuration (`.env`)
 
 | Variable | Rôle |
@@ -82,6 +85,8 @@ npm run db:seed   # applique le schéma + seed initial
 - [x] Mécanique de pump — boutons rapides + saisie libre, split 70/30 configurable, tx atomique 2 transferts
 - [x] Durée de vie dynamique (24h + paliers à chaque pump, sans plafond)
 - [x] Leaderboard posts + créateurs, mondial & par pays (géoloc IP à la volée, non stockée), scroll infini
+- [x] Filtre par période (Tout / 24h / 7 jours / 30 jours) combinable avec posts/créateurs et monde/pays —
+      sommes calculées depuis le journal des pumps (table `pumps`), pagination par curseur
 - [ ] Modération niveau 1 — **hors scope de cette session** (Phase 2)
 
 Hors scope (rappel) : modération IA & panel admin, bot Telegram, programme Anchor

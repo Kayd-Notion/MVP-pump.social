@@ -72,6 +72,12 @@ export function buildSeed(now: number = Date.now()): {
     { id: "p11", userId: "u1", text: "Le classement par pays est live 🇫🇷🇺🇸🇯🇵🇧🇷. Regardez où vous vous situez.", hoursAgo: 4, pumped: 27.5, comments: 11, reposts: 19, likes: 156, country: "FR", tags: ["#leaderboard"], mediaType: "image" },
     { id: "p12", userId: "u4", text: "GM à tous les degens. Que vos pumps soient verts aujourd'hui. 🟢", hoursAgo: 0.5, pumped: 3.2, comments: 1, reposts: 0, likes: 18, country: "BR", tags: ["#gm"] },
     { id: "p13", userId: "u6", text: "Nouveau pack de stickers pixel pour la communauté. Pump = accès instantané.", hoursAgo: 15, pumped: 20.0, comments: 9, reposts: 14, likes: 99, country: "US", tags: ["#art", "#community"], mediaType: "image" },
+    // Older posts (already expired) so 24h / 7 days / 30 days / all-time
+    // leaderboards differ in the demo. Their pumps are dated in the past below.
+    { id: "p14", userId: "u4", text: "Récap de la semaine : merci pour les pumps sur mon setup 🌙", hoursAgo: 72, pumped: 18.0, comments: 4, reposts: 5, likes: 80, country: "BR", tags: ["#recap"] },
+    { id: "p15", userId: "u7", text: "Thread : pourquoi le ZK va tout changer pour les réseaux sociaux on-chain. 🧵", hoursAgo: 120, pumped: 7.5, comments: 9, reposts: 17, likes: 133, country: "JP", tags: ["#zk", "#thread"] },
+    { id: "p16", userId: "u3", text: "Premier commit du SDK pump.social. Ça commence ici. 🛠️", hoursAgo: 480, pumped: 15.0, comments: 12, reposts: 30, likes: 250, country: "JP", tags: ["#dev"] },
+    { id: "p17", userId: "u2", text: "Ma toute première collection NFT est en ligne 🎨", hoursAgo: 1080, pumped: 9.0, comments: 6, reposts: 8, likes: 64, country: "US", tags: ["#nft"] },
   ];
 
   const posts: Post[] = raw.map((p) => ({
@@ -107,22 +113,34 @@ export function buildSeed(now: number = Date.now()): {
     { userId: "u2", amount: 1.0, hoursAgo: 5 },
   ];
   let seq = 0;
+  const addPump = (postId: string, pumperUserId: string, amount: number, hoursAgo: number) => {
+    const post = posts.find((p) => p.id === postId)!;
+    seq++;
+    pumps.push({
+      id: `seedpump${seq}`,
+      postId,
+      pumperUserId,
+      amount,
+      creatorAmount: amount * 0.7,
+      founderAmount: amount * 0.3,
+      signature: `seed-${postId}-${seq}`,
+      anonymous: false,
+      createdAt: now - hoursAgo * H,
+      creatorUserId: post.userId,
+      postCountry: post.country,
+    });
+  };
   for (const pid of ["p1", "p4", "p7"]) {
-    for (const t of pumperTemplate) {
-      seq++;
-      pumps.push({
-        id: `seedpump${seq}`,
-        postId: pid,
-        pumperUserId: t.userId,
-        amount: t.amount,
-        creatorAmount: t.amount * 0.7,
-        founderAmount: t.amount * 0.3,
-        signature: `seed-${pid}-${seq}`,
-        anonymous: false,
-        createdAt: now - t.hoursAgo * H,
-      });
-    }
+    for (const t of pumperTemplate) addPump(pid, t.userId, t.amount, t.hoursAgo);
   }
+  // Older history (outside 24h, some outside 7 / 30 days).
+  addPump("p14", "u5", 10.0, 70);
+  addPump("p14", "u1", 8.0, 60);
+  addPump("p15", "u3", 4.5, 118);
+  addPump("p15", "u6", 3.0, 100);
+  addPump("p16", "u5", 9.0, 478);
+  addPump("p16", "u2", 6.0, 400);
+  addPump("p17", "u1", 9.0, 1078);
 
   return { users, posts, comments, pumps };
 }

@@ -434,6 +434,8 @@ a { color: var(--accent); text-decoration: none; }
 /* -------- 7. Leaderboard --------------------------------------------- */
 .lb-controls { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
 .seg { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Scope (monde/pays) and period pills side by side; wraps to two lines on mobile. */
+.lb-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .lb-row {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 16px; border-bottom: 1px solid var(--border-soft);

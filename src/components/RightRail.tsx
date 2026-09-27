@@ -5,7 +5,7 @@ import { Avatar } from "./Avatar";
 import { api } from "@/lib/api";
 import { useUI } from "@/context/UIContext";
 import { fmtSol } from "@/lib/format";
-import type { ClientUser } from "@/lib/client-types";
+import type { LeaderboardCreatorItem } from "@/lib/client-types";
 
 const TRENDS = [
   { tag: "#solana", count: "12.4k posts" },
@@ -17,14 +17,14 @@ const TRENDS = [
 export function RightRail() {
   const router = useRouter();
   const { dataVersion } = useUI();
-  const [creators, setCreators] = useState<ClientUser[]>([]);
+  const [creators, setCreators] = useState<LeaderboardCreatorItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     api
-      .leaderboard({ kind: "creators", scope: "world", limit: 3 })
+      .leaderboard({ kind: "creators", scope: "world", period: "all", limit: 3 })
       .then((res) => {
-        if (!cancelled) setCreators(res.items as ClientUser[]);
+        if (!cancelled) setCreators(res.items);
       })
       .catch(() => {});
     return () => {
@@ -36,7 +36,7 @@ export function RightRail() {
     <aside className="right-rail">
       <div className="rail-card">
         <h4>🏆 Top créateurs</h4>
-        {creators.map((u, i) => (
+        {creators.map(({ user: u, total }, i) => (
           <div
             key={u.id}
             className="lb-row"
@@ -54,7 +54,7 @@ export function RightRail() {
               <div className="lb-sub">@{u.handle}</div>
             </div>
             <div className="lb-amount" style={{ fontSize: 13 }}>
-              ⚡{fmtSol(u.received)}
+              ⚡{fmtSol(total)}
             </div>
           </div>
         ))}

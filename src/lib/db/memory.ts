@@ -13,6 +13,9 @@ import { buildSeed } from "./seed";
 import type {
   Comment,
   CommentWithAuthor,
+  CreatorRankEntry,
+  LeaderboardCursor,
+  PostRankEntry,
   FeedQuery,
   LeaderboardQuery,
   Post,
@@ -54,6 +57,7 @@ async function load(): Promise<DbShape> {
     try {
       const raw = await fs.readFile(DATA_FILE, "utf8");
       db = JSON.parse(raw) as DbShape;
+      if (backfillPumpSnapshots(db)) await persistNow(db);
     } catch {
       db = buildSeed();
       await persistNow(db); // best-effort; safe if the FS is read-only
@@ -61,6 +65,35 @@ async function load(): Promise<DbShape> {
     return db;
   })();
   return loading;
+}
+
+/**
+ * Pumps recorded before creator/country were stored on the pump row get them
+ * filled from their post (when it still exists). Returns true if anything changed.
+ */
+function backfillPumpSnapshots(d: DbShape): boolean {
+  let changed = false;
+  for (const pm of d.pumps) {
+    if (pm.creatorUserId && pm.postCountry) continue;
+    const post = d.posts.find((p) => p.id === pm.postId);
+    if (!post) continue;
+    pm.creatorUserId = post.userId;
+    pm.postCountry = post.country;
+    changed = true;
+  }
+  return changed;
+}
+
+/** Order: total desc, then id asc (stable tie-break shared with the cursor). */
+function byTotalThenId(a: { total: number; id: string }, b: { total: number; id: string }) {
+  return b.total - a.total || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/** Keyset filter: keep rows strictly after the cursor in that order. */
+function afterCursor(total: number, id: string, cursor?: LeaderboardCursor): boolean {
+  if (!cursor) return true;
+  const t = Number(cursor.total);
+  return total < t || (total === t && id > cursor.id);
 }
 
 async function persistNow(snapshot: DbShape): Promise<void> {
@@ -193,6 +226,8 @@ export function createMemoryStore(): Store {
         signature,
         anonymous,
         createdAt: Date.now(),
+        creatorUserId: post.userId,
+        postCountry: post.country,
       };
       d.pumps.push(pump);
       // Aggregates: post total, creator received, pumper given.
@@ -254,23 +289,74 @@ export function createMemoryStore(): Store {
 
     async leaderboardPosts(q: LeaderboardQuery) {
       const d = await load();
-      let list = d.posts.slice();
-      if (q.scope === "country" && q.country) list = list.filter((p) => p.country === q.country);
-      list.sort((a, b) => b.pumped - a.pumped);
-      list = list.slice(q.offset, q.offset + q.limit);
-      return list
-        .map((p) => {
-          const author = findUser(d, p.userId);
-          return author ? { ...p, author: authorOf(author) } : null;
-        })
-        .filter((x): x is PostWithAuthor => x !== null);
+      const byCountry = q.scope === "country" && q.country ? q.country : null;
+      let rows: { id: string; total: number; creatorUserId: string | null }[];
+
+      if (q.since === undefined) {
+        // All time: cumulative total kept on the post.
+        rows = d.posts
+          .filter((p) => !byCountry || p.country === byCountry)
+          .map((p) => ({ id: p.id, total: p.pumped, creatorUserId: p.userId }));
+      } else {
+        // Period: sum the per-pump log over the window. Uses only pump history
+        // (creator/country snapshots), never the post row, so posts whose
+        // content was removed still rank.
+        const sums = new Map<string, { total: number; creatorUserId: string | null }>();
+        for (const pm of d.pumps) {
+          if (pm.createdAt < q.since) continue;
+          if (byCountry && pm.postCountry !== byCountry) continue;
+          const cur = sums.get(pm.postId) ?? { total: 0, creatorUserId: pm.creatorUserId ?? null };
+          cur.total += pm.amount;
+          sums.set(pm.postId, cur);
+        }
+        rows = [...sums].map(([id, v]) => ({ id, ...v }));
+      }
+
+      rows = rows
+        .filter((r) => afterCursor(r.total, r.id, q.cursor))
+        .sort(byTotalThenId)
+        .slice(0, q.limit);
+
+      return rows.map((r): PostRankEntry => {
+        const post = d.posts.find((p) => p.id === r.id);
+        const author = post ? findUser(d, post.userId) : null;
+        const creator = findUser(d, post?.userId ?? r.creatorUserId ?? "");
+        return {
+          postId: r.id,
+          total: r.total,
+          cursorTotal: String(r.total),
+          post: post && author ? { ...post, author: authorOf(author) } : null,
+          creator: creator ? { id: creator.id, handle: creator.handle, wallet: creator.wallet } : null,
+        };
+      });
     },
     async leaderboardCreators(q: LeaderboardQuery) {
       const d = await load();
-      let list = d.users.slice();
-      if (q.scope === "country" && q.country) list = list.filter((u) => u.country === q.country);
-      list.sort((a, b) => b.received - a.received);
-      return list.slice(q.offset, q.offset + q.limit);
+      const byCountry = q.scope === "country" && q.country ? q.country : null;
+      let rows: { id: string; total: number; user: User }[];
+
+      if (q.since === undefined) {
+        rows = d.users.map((u) => ({ id: u.id, total: u.received, user: u }));
+      } else {
+        // Period: sum the creator share of pumps received in the window.
+        const sums = new Map<string, number>();
+        for (const pm of d.pumps) {
+          if (pm.createdAt < q.since || !pm.creatorUserId) continue;
+          sums.set(pm.creatorUserId, (sums.get(pm.creatorUserId) ?? 0) + pm.creatorAmount);
+        }
+        rows = [];
+        for (const [id, total] of sums) {
+          const user = findUser(d, id);
+          if (user) rows.push({ id, total, user });
+        }
+      }
+
+      return rows
+        .filter((r) => !byCountry || r.user.country === byCountry)
+        .filter((r) => afterCursor(r.total, r.id, q.cursor))
+        .sort(byTotalThenId)
+        .slice(0, q.limit)
+        .map((r): CreatorRankEntry => ({ user: r.user, total: r.total, cursorTotal: String(r.total) }));
     },
   };
 }

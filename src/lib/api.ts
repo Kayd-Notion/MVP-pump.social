@@ -4,6 +4,9 @@ import type {
   ClientPost,
   ClientPumper,
   ClientUser,
+  LeaderboardCreatorItem,
+  LeaderboardPeriod,
+  LeaderboardPostItem,
 } from "./client-types";
 
 /** Thin fetch wrapper: JSON, credentials, and typed errors. */
@@ -85,20 +88,29 @@ export const api = {
     }),
 
   // Leaderboard
-  leaderboard: (params: { kind: string; scope: string; country?: string; offset?: number; limit?: number }) => {
+  leaderboard: <K extends "posts" | "creators">(params: {
+    kind: K;
+    scope: "world" | "country";
+    period: LeaderboardPeriod;
+    country?: string;
+    cursor?: string | null;
+    limit?: number;
+  }) => {
     const p = new URLSearchParams({
       kind: params.kind,
       scope: params.scope,
-      offset: String(params.offset ?? 0),
+      period: params.period,
       limit: String(params.limit ?? 20),
     });
     if (params.country) p.set("country", params.country);
+    if (params.cursor) p.set("cursor", params.cursor);
     return req<{
-      kind: string;
+      kind: K;
       scope: string;
+      period: LeaderboardPeriod;
       country: string | null;
-      items: (ClientPost | ClientUser)[];
-      nextOffset: number | null;
+      items: K extends "creators" ? LeaderboardCreatorItem[] : LeaderboardPostItem[];
+      nextCursor: string | null;
     }>(`/api/leaderboard?${p}`);
   },
 

@@ -45,6 +45,13 @@ export interface Pump {
   signature: string; // on-chain tx signature
   anonymous: boolean;
   createdAt: number;
+  /**
+   * Snapshot of the post's creator and country at pump time. Stored on the pump
+   * itself so period leaderboards only depend on pump history — they keep
+   * working even if the post content is later removed from storage.
+   */
+  creatorUserId: string;
+  postCountry: string;
 }
 
 export interface Comment {
@@ -66,13 +73,45 @@ export interface FeedQuery {
   authorId?: string;
 }
 
+export type LeaderboardPeriod = "all" | "24h" | "7d" | "30d";
+
+/**
+ * Keyset cursor: the (total, id) of the last row already returned.
+ * `total` is kept as an exact decimal string so equality on ties is reliable.
+ */
+export interface LeaderboardCursor {
+  total: string;
+  id: string;
+}
+
 export interface LeaderboardQuery {
   kind: LeaderboardKind;
   scope: LeaderboardScope;
   country?: string;
   limit: number;
-  /** Offset-based cursor for infinite scroll. */
-  offset: number;
+  /**
+   * Window start (ms epoch). Undefined = all time, which reads the cumulative
+   * totals (post.pumped / user.received); otherwise pumps are summed from the
+   * per-pump log over [since, now].
+   */
+  since?: number;
+  cursor?: LeaderboardCursor;
+}
+
+/** A posts-leaderboard row. `post` is null when its content no longer exists. */
+export interface PostRankEntry {
+  postId: string;
+  total: number;
+  /** Exact sort key for the next cursor. */
+  cursorTotal: string;
+  post: PostWithAuthor | null;
+  creator: Pick<User, "id" | "handle" | "wallet"> | null;
+}
+
+export interface CreatorRankEntry {
+  user: User;
+  total: number;
+  cursorTotal: string;
 }
 
 /** A post enriched with its author, ready for the UI. */
@@ -135,6 +174,6 @@ export interface Store {
   listComments(postId: string): Promise<CommentWithAuthor[]>;
 
   // Leaderboards
-  leaderboardPosts(q: LeaderboardQuery): Promise<PostWithAuthor[]>;
-  leaderboardCreators(q: LeaderboardQuery): Promise<User[]>;
+  leaderboardPosts(q: LeaderboardQuery): Promise<PostRankEntry[]>;
+  leaderboardCreators(q: LeaderboardQuery): Promise<CreatorRankEntry[]>;
 }

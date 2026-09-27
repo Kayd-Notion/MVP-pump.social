@@ -36,18 +36,41 @@ create index if not exists posts_created_idx on posts (created_at desc);
 create index if not exists posts_pumped_idx on posts (pumped desc);
 create index if not exists posts_country_idx on posts (country);
 
+-- One row per pump (the per-pump log). It is the source for period
+-- leaderboards, so it must outlive post content: post_id deliberately has NO
+-- foreign key / ON DELETE CASCADE, and the creator + post country are
+-- snapshotted on the row at pump time.
 create table if not exists pumps (
   id              uuid primary key default gen_random_uuid(),
-  post_id         uuid not null references posts(id) on delete cascade,
+  post_id         uuid not null,
   pumper_user_id  uuid not null references users(id) on delete cascade,
   amount          double precision not null,
   creator_amount  double precision not null,
   founder_amount  double precision not null,
   signature       text not null unique,
   anonymous       boolean not null default false,
-  created_at      bigint not null
+  created_at      bigint not null,
+  creator_user_id uuid,
+  post_country    text
 );
+
+-- Migration for databases created before the period leaderboards.
+alter table pumps add column if not exists creator_user_id uuid;
+alter table pumps add column if not exists post_country text;
+alter table pumps drop constraint if exists pumps_post_id_fkey;
+update pumps pm
+  set creator_user_id = p.user_id, post_country = p.country
+  from posts p
+  where p.id = pm.post_id and (pm.creator_user_id is null or pm.post_country is null);
+
 create index if not exists pumps_post_idx on pumps (post_id, created_at desc);
+-- Window scans for period leaderboards (all / by country / by creator).
+create index if not exists pumps_created_idx on pumps (created_at);
+create index if not exists pumps_country_created_idx on pumps (post_country, created_at);
+create index if not exists pumps_creator_created_idx on pumps (creator_user_id, created_at);
+-- Keyset pagination on the all-time boards (total desc, id asc).
+create index if not exists posts_pumped_id_idx on posts (pumped desc, id);
+create index if not exists users_received_id_idx on users (received desc, id);
 
 create table if not exists comments (
   id          uuid primary key default gen_random_uuid(),
