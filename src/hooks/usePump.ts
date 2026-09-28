@@ -14,7 +14,7 @@ import type { ClientPost } from "@/lib/client-types";
  */
 export function usePump() {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
 
   const runPump = useCallback(
     async (
@@ -42,11 +42,14 @@ export function usePump() {
           creatorWallet: post.author.wallet,
           amountSol,
           sendTransaction,
+          signTransaction,
           target: { platformWallet: cfg.platformWallet, platformBps: cfg.platformBps },
         });
         signature = result.signature;
       } catch (e) {
-        // Wallet / network errors (e.g. rent minimum) → readable message.
+        // Wallet / network errors (e.g. rent minimum) → readable message; the
+        // raw error stays in the browser console for debugging.
+        console.error("pump failed", e);
         throw new Error(humanizePumpError(e));
       }
 
@@ -59,7 +62,7 @@ export function usePump() {
       });
       return { post: updated, postPurged: Boolean(postPurged) };
     },
-    [connection, publicKey, sendTransaction],
+    [connection, publicKey, sendTransaction, signTransaction],
   );
 
   return { runPump, canSign: Boolean(publicKey && sendTransaction) };

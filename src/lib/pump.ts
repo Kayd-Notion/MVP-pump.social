@@ -119,8 +119,18 @@ export type SendTransactionFn = (
   options?: { skipPreflight?: boolean },
 ) => Promise<TransactionSignature>;
 
+/** Wallet-adapter's signTransaction (undefined when the wallet can't sign only). */
+export type SignTransactionFn = (transaction: Transaction) => Promise<Transaction>;
+
 export interface SendPumpArgs extends BuildPumpArgs {
   sendTransaction: SendTransactionFn;
+  /**
+   * Preferred path: the wallet only signs and the app broadcasts on its own
+   * RPC, so the pump lands on the app's cluster (devnet) whatever network the
+   * wallet UI is set to — and RPC errors come back with their real reason
+   * instead of a wallet's generic "Unexpected error".
+   */
+  signTransaction?: SignTransactionFn;
 }
 
 export interface SendPumpResult extends PumpQuote {
@@ -139,10 +149,22 @@ export async function sendPump(args: SendPumpArgs): Promise<SendPumpResult> {
       "Les pumps sont désactivés sur mainnet tant que le programme on-chain n'est pas audité.",
     );
   }
-  const { connection, sendTransaction } = args;
+  const { connection, sendTransaction, signTransaction } = args;
   const { transaction, quote } = await buildPumpTransaction(args);
 
-  const signature = await sendTransaction(transaction, connection);
+  // Dry run on the app's cluster before the wallet opens: a pump that would
+  // fail (empty wallet, rent minimum…) is reported with its real reason and
+  // never shown for signing.
+  const sim = await connection.simulateTransaction(transaction);
+  if (sim.value.err) {
+    throw Object.assign(new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`), {
+      logs: sim.value.logs ?? [],
+    });
+  }
+
+  const signature = signTransaction
+    ? await connection.sendRawTransaction((await signTransaction(transaction)).serialize())
+    : await sendTransaction(transaction, connection);
   const confirmation = await connection.confirmTransaction(
     {
       signature,

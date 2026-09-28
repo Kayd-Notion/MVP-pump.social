@@ -39,6 +39,8 @@ test("pump errors: other wallet/network failures are readable too", () => {
   assert.match(humanizePumpError(new Error("Attempt to debit an account but found no record of a prior credit.")), /Solde insuffisant/);
   assert.match(humanizePumpError(new Error("User rejected the request.")), /annulée/);
   assert.match(humanizePumpError(new Error("Blockhash not found")), /expiré/);
+  assert.match(humanizePumpError(new Error("Simulation failed: \"AccountNotFound\"")), /Solde insuffisant/);
+  assert.match(humanizePumpError(new Error("Unexpected error")), /Solana Devnet/);
   assert.equal(humanizePumpError(new Error("autre chose")), "autre chose");
 });
 
