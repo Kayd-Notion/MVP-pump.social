@@ -9,6 +9,8 @@ import { usePump } from "@/hooks/usePump";
 import { api } from "@/lib/api";
 import { mediaTypeOf } from "@/lib/irys";
 import type { UploadedMedia } from "@/lib/api-types";
+import { MIN_PUMP_SOL } from "@/lib/pump-config";
+import { formatSolFr } from "@/lib/pump-rules";
 
 export function ComposerModal() {
   const { closeModal, toast, bumpData } = useUI();
@@ -43,6 +45,15 @@ export function ComposerModal() {
     if (!body) {
       toast("Écris quelque chose 🙂");
       return;
+    }
+    // Rule 3: check the optional initial pump BEFORE publishing.
+    const wanted = withPump ? parseFloat(pumpAmount) || 0 : 0;
+    if (wanted > 0) {
+      const { minPumpSol } = await api.pumpConfig().catch(() => ({ minPumpSol: MIN_PUMP_SOL }));
+      if (wanted + 1e-9 < minPumpSol) {
+        toast(`Pump initial : minimum ${formatSolFr(minPumpSol)} SOL`);
+        return;
+      }
     }
     try {
       let media: UploadedMedia | null = null;

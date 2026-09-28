@@ -26,6 +26,20 @@ export interface PumpConfig {
   platformWallet: string;
   creatorBps: number;
   platformBps: number;
+  /** Rule 3: smallest pump accepted (SOL). */
+  minPumpSol: number;
+}
+
+/**
+ * What the pump modal needs about a post (rule 2 + 3). `deleted` → no pump
+ * possible; `expired` → at least `minToSaveSol` to save it.
+ */
+export interface PumpQuote {
+  status: "active" | "expired" | "deleted";
+  minPumpSol: number;
+  minToSaveSol: number | null;
+  /** max(minPumpSol, minToSaveSol) — the confirm button needs at least this. */
+  requiredMinSol: number;
 }
 
 export interface LeaderboardParams<K extends "posts" | "creators"> {
@@ -79,7 +93,19 @@ export interface Api {
 
   // Pump
   pumpConfig(): Promise<PumpConfig>;
-  recordPump(postId: string, input: { amount: number; signature: string; anonymous?: boolean }): Promise<{ post: ClientPost }>;
+  /** Rules for this post right now (shown in the modal). */
+  pumpQuote(postId: string): Promise<PumpQuote>;
+  /**
+   * Server-side re-check right BEFORE signing (post purged meanwhile? amount
+   * still enough?). Throws ApiError (code post_deleted | amount_too_low_to_save
+   * | below_min_pump, with the new minimum in `data`) → nothing gets signed.
+   * Returns a reservation id to pass to recordPump (null if not applicable).
+   */
+  preparePump(postId: string, amountSol: number): Promise<{ intentId: string | null }>;
+  recordPump(
+    postId: string,
+    input: { amount: number; signature: string; anonymous?: boolean; intentId?: string | null },
+  ): Promise<{ post: ClientPost; postPurged?: boolean }>;
 
   // Comments
   addComment(postId: string, text: string): Promise<{ comments: ClientComment[] }>;

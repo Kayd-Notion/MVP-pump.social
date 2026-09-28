@@ -145,19 +145,22 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
           </span>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            className="pump-btn"
-            style={{ flex: 1, padding: 11, opacity: post.deleted ? 0.5 : 1 }}
-            onClick={doPump}
-            disabled={post.deleted}
-          >
-            ⚡ Pump ce post
-          </button>
-          <button className="btn" onClick={() => toast("🚩 Signalé (modération — hors scope MVP)")}>
-            🚩
-          </button>
-        </div>
+        {post.deleted ? (
+          // Rule 2.1: a purged post can't be pumped — no Pump button at all.
+          <div className="pump-notice" style={{ marginBottom: 0 }}>
+            <b>🗑️ Post supprimé</b>
+            Il a expiré et son contenu a été supprimé : il ne peut plus être pumpé.
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="pump-btn" style={{ flex: 1, padding: 11 }} onClick={doPump}>
+              ⚡ Pump ce post
+            </button>
+            <button className="btn" onClick={() => toast("🚩 Signalé (modération — hors scope MVP)")}>
+              🚩
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Pumpers */}
@@ -184,7 +187,14 @@ export default function PostDetailPage({ params }: { params: Promise<{ id: strin
               <Avatar id={pp.author!.handle} handle={pp.author!.handle} size="sm" />
             )}
             <div>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{name}</div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                {name}
+                {pp.isSelfPump && (
+                  <span className="self-pump-tag" title="Le créateur a pumpé son propre post">
+                    auto-pump
+                  </span>
+                )}
+              </div>
               <div className="faint" style={{ fontSize: 12 }}>
                 {sub}
               </div>

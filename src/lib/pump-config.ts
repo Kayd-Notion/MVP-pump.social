@@ -55,3 +55,18 @@ const isMainnet = (process.env.NEXT_PUBLIC_SOLANA_CLUSTER || "devnet").trim() ==
 
 export const FOUNDER_WALLET =
   process.env.NEXT_PUBLIC_FOUNDER_WALLET || (isMainnet ? "" : DEVNET_DEMO_FOUNDER);
+
+/**
+ * Pump product rules — the single place for these values on the frontend.
+ * With the standalone backend, the backend's own values (GET /config) take
+ * precedence; these apply to the Next.js routes (Vercel preview).
+ */
+// Rule 3: minimum pump. 0.005 SOL keeps both shares (70/30) above Solana's
+// rent-exempt minimum for an empty recipient wallet. Do not hard-code the rent
+// value elsewhere: adjust this constant instead.
+export const MIN_PUMP_SOL = 0.005;
+// Rule 2: saving an expired post must give it at least this much life.
+export const PUMP_SAVE_MIN_LIFETIME_SECONDS = 3600;
+// Rule 2: extra margin on the amount shown in the modal, so it is still
+// enough when the user confirms a few minutes later.
+export const PUMP_QUOTE_SLACK_SECONDS = 300;

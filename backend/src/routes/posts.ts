@@ -112,9 +112,17 @@ export async function postRoutes(app: FastifyInstance) {
     const [post] = await sql<PostRow[]>`${postSelect()} where p.id = ${req.params.id}`;
     if (!post) throw notFound("post_not_found", "Post introuvable.");
     const pumps = await sql<
-      { id: string; from_wallet: string; pseudo: string | null; amount_sol: string; created_at: Date; tx_signature: string }[]
+      {
+        id: string;
+        from_wallet: string;
+        pseudo: string | null;
+        amount_sol: string;
+        created_at: Date;
+        tx_signature: string;
+        is_self_pump: boolean;
+      }[]
     >`
-      select pm.id, pm.from_wallet, u.pseudo, pm.amount_sol, pm.created_at, pm.tx_signature
+      select pm.id, pm.from_wallet, u.pseudo, pm.amount_sol, pm.created_at, pm.tx_signature, pm.is_self_pump
       from pumps pm left join users u on u.wallet_address = pm.from_wallet
       where pm.post_id = ${post.id}
       order by pm.created_at desc
@@ -127,6 +135,7 @@ export async function postRoutes(app: FastifyInstance) {
         amount_sol: p.amount_sol,
         created_at: p.created_at.toISOString(),
         tx_signature: p.tx_signature,
+        is_self_pump: p.is_self_pump, // rule 1: shown as an "auto-pump" badge
       })),
     };
   });

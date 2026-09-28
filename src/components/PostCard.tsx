@@ -88,9 +88,11 @@ export function PostCard({ post }: { post: ClientPost }) {
           <button className="pa-btn" onClick={() => toast("🚩 Post signalé (modération — hors scope MVP)")}>
             <span className="pa-ico">🚩</span>
           </button>
-          <button className="pump-btn" onClick={doPump}>
-            ⚡ Pump
-          </button>
+          {!post.deleted && (
+            <button className="pump-btn" onClick={doPump}>
+              ⚡ Pump
+            </button>
+          )}
         </div>
       </div>
     </article>

@@ -23,30 +23,46 @@ export interface NewPump {
   creatorSol: string;
   platformSol: string;
   txSignature: string;
+  /** Reservation from POST /pumps/prepare, closed by this pump (optional). */
+  intentId?: string | null;
 }
 
 /** Insert the pump and update every derived counter + the post's expiry. */
 export async function recordPump(tx: Tx, p: NewPump) {
-  // Lock the post row: concurrent pumps on one post serialize here.
-  const [post] = await tx<{ created_at: Date; duration_expires_at: Date; country: string | null }[]>`
-    select created_at, duration_expires_at, country from posts where id = ${p.postId} for update`;
+  // Lock the post row: concurrent pumps — and the purge job — serialize here.
+  const [post] = await tx<
+    { created_at: Date; duration_expires_at: Date; country: string | null; deleted_at: Date | null }[]
+  >`select created_at, duration_expires_at, country, deleted_at from posts where id = ${p.postId} for update`;
 
-  const [pump] = await tx<{ id: string; created_at: Date }[]>`
+  // Rule 2, last line of defence: the transfer already happened on-chain and
+  // cannot be undone. If the post got purged meanwhile (client skipped the
+  // pre-check, or reported long after confirming), the pump is still recorded
+  // — hiding a real payment would be worse — but flagged for a manual refund.
+  const afterPurge = post.deleted_at !== null;
+
+  const [pump] = await tx<{ id: string; created_at: Date; is_self_pump: boolean }[]>`
     insert into pumps (post_id, from_wallet, to_creator_wallet, to_platform_wallet,
-                       amount_sol, creator_amount_sol, platform_amount_sol, tx_signature)
+                       amount_sol, creator_amount_sol, platform_amount_sol, tx_signature,
+                       recorded_after_purge)
     values (${p.postId}, ${p.fromWallet}, ${p.creatorWallet}, ${p.platformWallet},
-            ${p.amountSol}, ${p.creatorSol}, ${p.platformSol}, ${p.txSignature})
-    returning id, created_at`;
+            ${p.amountSol}, ${p.creatorSol}, ${p.platformSol}, ${p.txSignature},
+            ${afterPurge})
+    returning id, created_at, is_self_pump`;
 
   const [{ total_pumped_sol }] = await tx<{ total_pumped_sol: string }[]>`
     update posts set total_pumped_sol = total_pumped_sol + ${p.amountSol}
     where id = ${p.postId} returning total_pumped_sol`;
 
-  // Extend lifespan per the tier config; never shorten it.
-  const byTiers = expiresAt(post.created_at, Number(total_pumped_sol));
-  const newExpiry = byTiers > post.duration_expires_at ? byTiers : post.duration_expires_at;
-  await tx`update posts set duration_expires_at = ${newExpiry} where id = ${p.postId}`;
+  // Extend lifespan per the tier config; never shorten it. (Pointless on a
+  // purged post: its content is gone.)
+  let newExpiry = post.duration_expires_at;
+  if (!afterPurge) {
+    const byTiers = expiresAt(post.created_at, Number(total_pumped_sol));
+    if (byTiers > newExpiry) newExpiry = byTiers;
+    await tx`update posts set duration_expires_at = ${newExpiry} where id = ${p.postId}`;
+  }
 
+  // Self-pumps count like any other pump (rule 1: no special treatment).
   await tx`update users set total_received_sol = total_received_sol + ${p.creatorSol}
            where wallet_address = ${p.creatorWallet}`;
   await tx`update users set total_given_sol = total_given_sol + ${p.amountSol}
@@ -58,7 +74,23 @@ export async function recordPump(tx: Tx, p: NewPump) {
       on conflict (country, creator_wallet)
       do update set total_received_sol = creator_country_totals.total_received_sol + excluded.total_received_sol`;
   }
-  return { pumpId: pump.id, createdAt: pump.created_at, totalPumpedSol: total_pumped_sol, expiresAt: newExpiry };
+
+  // Close the reservation made before signing (lets the purge job proceed).
+  if (p.intentId) {
+    await tx`
+      update pump_intents set resolved_at = now(), pump_id = ${pump.id}
+      where id = ${p.intentId} and post_id = ${p.postId}
+        and wallet_address = ${p.fromWallet} and resolved_at is null`;
+  }
+
+  return {
+    pumpId: pump.id,
+    createdAt: pump.created_at,
+    isSelfPump: pump.is_self_pump,
+    recordedAfterPurge: afterPurge,
+    totalPumpedSol: total_pumped_sol,
+    expiresAt: newExpiry,
+  };
 }
 
 /** Recompute every derived counter from `pumps`. Safe to run anytime. */

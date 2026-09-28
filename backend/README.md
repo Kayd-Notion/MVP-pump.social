@@ -38,7 +38,9 @@ décimales exactes (`"1.600000000"`). Routes 🔒 : `Authorization: Bearer <jwt>
 | POST 🔒✎ | `/posts` `{texte, media_key?}` | crée le post (expiration = maintenant + 24 h) |
 | GET | `/feed?cursor=&limit=` | posts non supprimés, du plus récent, pagination par curseur |
 | GET | `/posts/:id` | post (tombstone s'il est purgé) + ses derniers pumps |
-| POST 🔒✎ | `/pumps` `{post_id, tx_signature, amount_sol}` | vérifie la transaction on-chain puis enregistre |
+| GET | `/posts/:id/pump-quote` | état du post pour la modale : `active` / `expired` / `deleted`, minimum requis |
+| POST 🔒✎ | `/pumps/prepare` `{post_id, amount_sol}` | contrôle **juste avant la signature** + réservation courte (voir règles) |
+| POST 🔒✎ | `/pumps` `{post_id, tx_signature, amount_sol, intent_id?}` | vérifie la transaction on-chain puis enregistre |
 | GET | `/leaderboard/posts` · `/leaderboard/creators` | `period=all\|24h\|7d\|30d`, `scope=world\|country`, `country=XX`, `cursor`, `limit` |
 
 ## Choix de conception
@@ -111,14 +113,52 @@ cross-origin. Il est stateless : se déconnecter = oublier le token côté clien
 Le frontend le garde dans `localStorage`, donc une faille XSS pourrait le lire :
 à garder en tête (CSP) avant la prod.
 
-## Points à trancher côté produit
+## Règles produit du pump
 
-- **Auto-pump** : rien n'empêche un créateur de pumper son propre post. Il ne
-  « paie » alors que les 30 % plateforme pour monter au classement.
-- **Petits montants** : un transfert vers un wallet vide doit laisser au moins
-  ~0,00089 SOL (minimum de rent Solana), sinon la transaction échoue on-chain.
-  Un pump de 0,01 SOL (le plus petit bouton rapide) passe ; en dessous d'environ
-  0,003 SOL, ça peut échouer si un destinataire est vide.
+Chaque règle est vérifiée dans l'interface **et** par l'API. Le code des
+règles est dans `lib/pump-rules.ts`.
+
+**1. Auto-pump autorisé.** Un créateur peut pumper son propre post. Aucune
+logique spéciale : il reçoit ses propres 70 %, donc son coût réel est les 30 %
+plateforme plus les frais. Chaque pump porte `is_self_pump`, une colonne
+calculée par Postgres (`from_wallet = to_creator_wallet`) : elle ne peut pas
+être fausse. Le pump compte dans les totaux et les classements comme les autres.
+
+**2. Post expiré ou purgé.**
+- **Post purgé** : `pump-quote` renvoie `deleted`, l'interface n'affiche pas de
+  bouton Pump, et `POST /pumps/prepare` refuse (`409 post_deleted`).
+- **Post expiré, pas encore purgé** : `pump-quote` donne le minimum qui repousse
+  l'expiration à au moins maintenant + `PUMP_SAVE_MIN_LIFETIME_SECONDS` (1 h par
+  défaut). Il est calculé avec les paliers de `config/lifespan.ts` et arrondi au
+  millième au-dessus. La modale le pré-remplit et exige au moins ce montant.
+- **Juste avant la signature** : le client appelle `POST /pumps/prepare`, qui
+  recalcule tout à cet instant, sous verrou de la ligne du post. Si le post a
+  été purgé entre-temps, il refuse avec `post_deleted`. Si le montant ne suffit
+  plus, il refuse avec `amount_too_low_to_save` et renvoie le nouveau
+  `required_min_sol`. Dans les deux cas, aucune transaction n'est présentée au
+  wallet.
+- **Course purge / confirmation** : `prepare` crée une réservation
+  (`pump_intents`, `PUMP_INTENT_TTL_SECONDS` = 3 min, plus long que la durée de
+  validité d'une transaction Solana). La purge prend le même verrou et **reporte**
+  tout post qui a une réservation active. La réservation est close quand le pump
+  est enregistré.
+- **Cas résiduels** (client qui saute `prepare`, ou qui plante après la
+  confirmation) : un transfert arrivé sur un post déjà purgé est **quand même
+  enregistré**, avec `recorded_after_purge = true`, et journalisé
+  (`PUMP_AFTER_PURGE`). Une réservation expirée sans pump enregistré est
+  journalisée (`PUMP_INTENT_UNRESOLVED`). Pour les remboursements manuels :
+  ```sql
+  select * from pumps where recorded_after_purge;
+  select * from pump_intents where flagged_at is not null;  -- à vérifier on-chain
+  ```
+
+**3. Montant minimum.** `MIN_PUMP_SOL` (0,005 par défaut) est défini à un seul
+endroit : `config.ts`, via l'env. Le frontend le lit dans `GET /config`.
+`prepare` et `POST /pumps` refusent tout montant inférieur (`below_min_pump`),
+même si l'interface est contournée. À 0,005 SOL, les deux parts (70/30)
+dépassent le minimum de rent Solana d'un wallet vide. Si une transaction échoue
+quand même pour cette raison (par exemple avec un autre ratio), l'interface
+affiche un message clair plutôt que l'erreur brute.
 
 ## Vers le VPS (session suivante)
 

@@ -14,7 +14,8 @@ import type {
   LeaderboardCreatorItem,
   LeaderboardPostItem,
 } from "./client-types";
-import type { Api, LeaderboardPage, LeaderboardParams, PumpConfig } from "./api-types";
+import type { Api, LeaderboardPage, LeaderboardParams, PumpConfig, PumpQuote } from "./api-types";
+import { ApiError } from "./api-error";
 import { shortWallet } from "./format";
 
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
@@ -48,9 +49,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: string; message?: string };
   if (res.status === 401) store.set(null); // expired/invalid token: back to visitor
-  if (!res.ok) throw new Error(data.message || data.error || `Erreur ${res.status}`);
+  if (!res.ok) throw new ApiError(data.message || data.error || `Erreur ${res.status}`, data.error ?? null, res.status, data);
   return data as T;
 }
 
@@ -109,6 +110,11 @@ function toPost(p: BPost): ClientPost {
     tags: Array.from(new Set((text.match(/#[\p{L}0-9_]+/gu) || []).map((t) => t.toLowerCase()))),
     author: { id: p.author.wallet, handle: p.author.pseudo, wallet: p.author.wallet, bio: "" },
   };
+}
+
+/** Same lamport rounding as the transaction (lib/format solToLamports). */
+function toSolString(amount: number): string {
+  return (Math.round(amount * 1e9) / 1e9).toFixed(9);
 }
 
 // The sign-in message comes from /auth/nonce and must be sent back verbatim.
@@ -208,29 +214,36 @@ export const backendApi: Api = {
   post: async (id) => {
     const r = await call<{
       post: BPost;
-      pumps: { id: string; from: { wallet: string; pseudo: string | null }; amount_sol: string; created_at: string }[];
+      pumps: {
+        id: string;
+        from: { wallet: string; pseudo: string | null };
+        amount_sol: string;
+        created_at: string;
+        is_self_pump: boolean;
+      }[];
     }>("GET", `/posts/${id}`);
     const pumpers: ClientPumper[] = r.pumps.map((p) => ({
       id: p.id,
       amount: Number(p.amount_sol),
       createdAt: Date.parse(p.created_at),
       anonymous: false,
+      isSelfPump: p.is_self_pump,
       label: p.from.pseudo ?? shortWallet(p.from.wallet),
       author: { handle: p.from.pseudo ?? shortWallet(p.from.wallet), wallet: shortWallet(p.from.wallet) },
     }));
     return { post: toPost(r.post), pumpers, comments: [] };
   },
 
-  // Pump — recipients and ratio come from the backend itself.
+  // Pump — recipients, ratio and minimum come from the backend itself.
   pumpConfig: () => {
-    pumpConfigPromise ??= call<{ pump: { platform_wallet: string; creator_bps: number; platform_bps: number } }>(
-      "GET",
-      "/config",
-    )
+    pumpConfigPromise ??= call<{
+      pump: { platform_wallet: string; creator_bps: number; platform_bps: number; min_pump_sol: string };
+    }>("GET", "/config")
       .then((r) => ({
         platformWallet: r.pump.platform_wallet,
         creatorBps: r.pump.creator_bps,
         platformBps: r.pump.platform_bps,
+        minPumpSol: Number(r.pump.min_pump_sol),
       }))
       .catch((e) => {
         pumpConfigPromise = null;
@@ -238,12 +251,34 @@ export const backendApi: Api = {
       });
     return pumpConfigPromise;
   },
-  recordPump: async (postId, { amount, signature }) => {
-    // Same lamport rounding as the transaction (lib/format solToLamports).
-    const amountSol = (Math.round(amount * 1e9) / 1e9).toFixed(9);
-    await call("POST", "/pumps", { post_id: postId, tx_signature: signature, amount_sol: amountSol });
+  pumpQuote: async (postId) => {
+    const r = await call<{ status: PumpQuote["status"]; min_pump_sol: string; min_to_save_sol: string | null; required_min_sol: string }>(
+      "GET",
+      `/posts/${postId}/pump-quote`,
+    );
+    return {
+      status: r.status,
+      minPumpSol: Number(r.min_pump_sol),
+      minToSaveSol: r.min_to_save_sol === null ? null : Number(r.min_to_save_sol),
+      requiredMinSol: Number(r.required_min_sol),
+    };
+  },
+  preparePump: async (postId, amountSol) => {
+    const r = await call<{ intent_id: string }>("POST", "/pumps/prepare", {
+      post_id: postId,
+      amount_sol: toSolString(amountSol),
+    });
+    return { intentId: r.intent_id };
+  },
+  recordPump: async (postId, { amount, signature, intentId }) => {
+    const rec = await call<{ post_purged: boolean }>("POST", "/pumps", {
+      post_id: postId,
+      tx_signature: signature,
+      amount_sol: toSolString(amount),
+      ...(intentId ? { intent_id: intentId } : {}),
+    });
     const r = await call<{ post: BPost }>("GET", `/posts/${postId}`);
-    return { post: toPost(r.post) };
+    return { post: toPost(r.post), postPurged: rec.post_purged };
   },
 
   addComment: async () => {

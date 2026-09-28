@@ -5,6 +5,8 @@ import { resolvedSplitBps } from "@/lib/pump-config";
 import { verifyPumpTransaction } from "@/lib/verify-pump";
 import { solToLamports } from "@/lib/format";
 import { lifespanInfo } from "@/lib/lifespan";
+import { MIN_PUMP_SOL } from "@/lib/pump-config";
+import { formatSolFr } from "@/lib/pump-rules";
 
 export const runtime = "nodejs";
 
@@ -35,6 +37,13 @@ export async function POST(
   }
   if (!signature) {
     return NextResponse.json({ error: "Signature de transaction manquante." }, { status: 400 });
+  }
+  // Rule 3, server-side even if the client skipped the pre-check.
+  if (amount < MIN_PUMP_SOL) {
+    return NextResponse.json(
+      { error: `Minimum ${formatSolFr(MIN_PUMP_SOL)} SOL par pump.`, code: "below_min_pump" },
+      { status: 400 },
+    );
   }
 
   const store = getStore();

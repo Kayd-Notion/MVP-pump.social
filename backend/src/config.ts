@@ -1,3 +1,5 @@
+import { solToLamports } from "./lib/money.js";
+
 /**
  * All runtime configuration comes from environment variables (see
  * ../.env.example). Parsed and validated once at startup: a misconfigured
@@ -33,6 +35,17 @@ function list(name: string, fallback: string): string[] {
 }
 
 const cluster = str("SOLANA_CLUSTER", "devnet");
+
+// Rule 3 — minimum pump. THE single place for this value in the backend (the
+// frontend reads it from GET /config). 0.005 SOL keeps both shares (70/30)
+// above Solana's rent-exempt minimum for an empty recipient wallet.
+const minPumpSol = str("MIN_PUMP_SOL", "0.005");
+let minPumpLamports: bigint;
+try {
+  minPumpLamports = solToLamports(minPumpSol);
+} catch {
+  throw new Error(`MIN_PUMP_SOL must be a SOL amount (got "${minPumpSol}")`);
+}
 if (!["devnet", "testnet", "mainnet-beta"].includes(cluster)) {
   throw new Error(`SOLANA_CLUSTER must be devnet, testnet or mainnet-beta (got "${cluster}")`);
 }
@@ -83,6 +96,17 @@ export const config = {
     // Reject transactions older than this (a pump is recorded right after it
     // is sent; an old transfer to the creator must not be claimable as a pump).
     maxTxAgeSeconds: int("PUMP_MAX_TX_AGE_SECONDS", 900),
+    minPumpLamports,
+    // Rule 2 — saving an expired post must give it at least this much life
+    // after the pump (otherwise the purge could delete it minutes later).
+    saveMinLifetimeSeconds: int("PUMP_SAVE_MIN_LIFETIME_SECONDS", 3600),
+    // Rule 2 — lifetime of the reservation made right before signing. Longer
+    // than a Solana transaction's validity (~1-2 min of blockhash), so a
+    // transfer can't land after its reservation expired.
+    intentTtlSeconds: int("PUMP_INTENT_TTL_SECONDS", 180),
+    // The amount shown in the modal is computed with this extra margin so it is
+    // still sufficient when the user confirms a few minutes later.
+    quoteSlackSeconds: 300,
   },
 
   storage: {

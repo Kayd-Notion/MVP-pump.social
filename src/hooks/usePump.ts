@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { sendPump } from "@/lib/pump";
 import { api } from "@/lib/api";
+import { humanizePumpError } from "@/lib/pump-errors";
 import type { ClientPost } from "@/lib/client-types";
 
 /**
@@ -20,27 +21,43 @@ export function usePump() {
       post: ClientPost,
       amountSol: number,
       anonymous: boolean,
-    ): Promise<ClientPost> => {
+    ): Promise<{ post: ClientPost; postPurged: boolean }> => {
       if (!publicKey || !sendTransaction) {
         throw new Error("Wallet non connecté.");
       }
-      // Recipients + ratio from the data source, so the transaction always
-      // matches what the backend verifies.
+      // 1. Server re-check at this exact moment (rules 2 + 3): post purged in
+      //    the meantime? amount still enough to save an expired post? If it
+      //    refuses (ApiError), we stop here — nothing is ever signed.
+      const { intentId } = await api.preparePump(post.id, amountSol);
+
+      // 2. Build + sign + send the atomic 2-transfer transaction (unchanged).
+      //    Recipients + ratio come from the data source, so the transaction
+      //    always matches what the backend verifies.
       const cfg = await api.pumpConfig();
-      const result = await sendPump({
-        connection,
-        payer: publicKey,
-        creatorWallet: post.author.wallet,
-        amountSol,
-        sendTransaction,
-        target: { platformWallet: cfg.platformWallet, platformBps: cfg.platformBps },
-      });
-      const { post: updated } = await api.recordPump(post.id, {
+      let signature: string;
+      try {
+        const result = await sendPump({
+          connection,
+          payer: publicKey,
+          creatorWallet: post.author.wallet,
+          amountSol,
+          sendTransaction,
+          target: { platformWallet: cfg.platformWallet, platformBps: cfg.platformBps },
+        });
+        signature = result.signature;
+      } catch (e) {
+        // Wallet / network errors (e.g. rent minimum) → readable message.
+        throw new Error(humanizePumpError(e));
+      }
+
+      // 3. Record it (the backend verifies the transaction on-chain).
+      const { post: updated, postPurged } = await api.recordPump(post.id, {
         amount: amountSol,
-        signature: result.signature,
+        signature,
         anonymous,
+        intentId,
       });
-      return updated;
+      return { post: updated, postPurged: Boolean(postPurged) };
     },
     [connection, publicKey, sendTransaction],
   );

@@ -121,11 +121,19 @@ node test/e2e.mjs        # bout en bout contre le stack lancé (auth, upload, pu
 ```
 
 Le test de bout en bout envoie de vraies transactions devnet : si le faucet
-public refuse l'airdrop, fournis un wallet devnet approvisionné (≥ 2 SOL, fichier JSON au
+public refuse l'airdrop, fournis un wallet devnet approvisionné (≥ 3 SOL, fichier JSON au
 format `solana-keygen`) :
 
 ```powershell
 $env:PUMPER_KEYPAIR = "C:\chemin\vers\keypair-devnet.json"; node test/e2e.mjs
+```
+
+Pour tester aussi les posts expirés / purgés (règle 2), le test a besoin
+d'accéder à la base afin de faire vieillir un post. Mets `PURGE_ENABLED=false`
+dans `.env` (puis `docker compose up -d`), et lance :
+
+```powershell
+$env:E2E_DATABASE_URL = "postgres://pump:<POSTGRES_PASSWORD>@localhost:5432/pump"; node test/e2e.mjs
 ```
 
 ### À propos de MinIO
@@ -243,4 +251,8 @@ scripts/setup-db.mjs   application du schéma + seed Postgres
 npm run typecheck   # tsc --noEmit
 npm run build       # build de prod
 npm run lint
+npm test            # tests unitaires frontend (règles du pump)
 ```
+
+Les règles produit du pump (auto-pump, post expiré ou purgé, montant minimum)
+sont décrites dans [`backend/README.md`](backend/README.md#règles-produit-du-pump).

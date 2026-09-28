@@ -5,8 +5,9 @@ import type {
   ClientPumper,
   ClientUser,
 } from "./client-types";
-import type { Api, LeaderboardPage, LeaderboardParams, ProfilePage } from "./api-types";
-import { FOUNDER_WALLET, resolvedSplitBps } from "./pump-config";
+import type { Api, LeaderboardPage, LeaderboardParams, ProfilePage, PumpQuote } from "./api-types";
+import { FOUNDER_WALLET, MIN_PUMP_SOL, resolvedSplitBps } from "./pump-config";
+import { ApiError } from "./api-error";
 import { backendApi, BACKEND_URL } from "./backend-api";
 
 /** Thin fetch wrapper: JSON, credentials, and typed errors. */
@@ -16,9 +17,14 @@ async function req<T>(url: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
     ...init,
   });
-  const data = await res.json().catch(() => ({}));
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    throw new Error((data as { error?: string }).error || `Erreur ${res.status}`);
+    throw new ApiError(
+      (data.error as string) || `Erreur ${res.status}`,
+      (data.code as string) ?? null,
+      res.status,
+      data,
+    );
   }
   return data as T;
 }
@@ -66,10 +72,18 @@ const nextApi: Api = {
   // Pump
   pumpConfig: async () => {
     const { creatorBps, founderBps } = resolvedSplitBps();
-    return { platformWallet: FOUNDER_WALLET, creatorBps, platformBps: founderBps };
+    return { platformWallet: FOUNDER_WALLET, creatorBps, platformBps: founderBps, minPumpSol: MIN_PUMP_SOL };
   },
-  recordPump: (postId, input) =>
-    req<{ post: ClientPost }>(`/api/posts/${postId}/pump`, { method: "POST", body: JSON.stringify(input) }),
+  pumpQuote: (postId) => req<PumpQuote>(`/api/posts/${postId}/pump-quote`),
+  preparePump: async (postId, amountSol) => {
+    await req(`/api/posts/${postId}/pump/prepare`, { method: "POST", body: JSON.stringify({ amount: amountSol }) });
+    return { intentId: null }; // no purge in this data source → no reservation needed
+  },
+  recordPump: (postId, { amount, signature, anonymous }) =>
+    req<{ post: ClientPost }>(`/api/posts/${postId}/pump`, {
+      method: "POST",
+      body: JSON.stringify({ amount, signature, anonymous }),
+    }),
 
   // Comments
   addComment: (postId, text) =>

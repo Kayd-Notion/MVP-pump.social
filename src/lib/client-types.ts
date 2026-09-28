@@ -39,6 +39,8 @@ export interface ClientPumper {
   amount: number;
   createdAt: number;
   anonymous: boolean;
+  /** Rule 1: the creator pumped their own post ("auto-pump" badge). */
+  isSelfPump?: boolean;
   label: string;
   author: { handle: string; wallet: string } | null;
 }

@@ -33,7 +33,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
-      return reply.status(err.statusCode).send({ error: err.code, message: err.message });
+      return reply.status(err.statusCode).send({ ...err.details, error: err.code, message: err.message });
     }
     const e = err as { validation?: unknown; statusCode?: number; message: string };
     if (e.validation) {

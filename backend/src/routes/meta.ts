@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { sql } from "../db.js";
 import { countryForIp, geoStatus } from "../lib/geo.js";
 import { storageHealthy } from "../lib/storage.js";
+import { lamportsToSol } from "../lib/money.js";
 
 export const ALLOWED_MEDIA_TYPES: Record<string, { ext: string; kind: "image" | "video" }> = {
   "image/jpeg": { ext: "jpg", kind: "image" },
@@ -36,6 +37,8 @@ export async function metaRoutes(app: FastifyInstance) {
       creator_bps: config.pump.creatorBps,
       platform_bps: config.pump.platformBps,
       max_tx_age_seconds: config.pump.maxTxAgeSeconds,
+      min_pump_sol: lamportsToSol(config.pump.minPumpLamports),
+      save_min_lifetime_seconds: config.pump.saveMinLifetimeSeconds,
     },
     media: { max_bytes: config.storage.maxBytes, content_types: Object.keys(ALLOWED_MEDIA_TYPES) },
   }));
