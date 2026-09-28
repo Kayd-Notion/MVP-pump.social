@@ -5,6 +5,9 @@
  */
 import postgres from "postgres";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { databaseUrl } from "./url";
 import type {
   CommentWithAuthor,
   CreatorRankEntry,
@@ -20,16 +23,40 @@ import type {
 
 type Sql = ReturnType<typeof postgres>;
 
-let sql: Sql | null = null;
-function getSql(): Sql {
-  if (!sql) {
-    const url = process.env.DATABASE_URL!;
-    sql = postgres(url, {
+let ready: Promise<Sql> | null = null;
+function getSql(): Promise<Sql> {
+  if (!ready) {
+    const url = databaseUrl()!;
+    const sql = postgres(url, {
       ssl: url.includes("sslmode=require") ? "require" : undefined,
       max: 5,
+      // Managed Postgres pools (Neon "-pooler", Supabase pgbouncer) run in
+      // transaction mode, which doesn't support named prepared statements.
+      prepare: false,
+      onnotice: () => {},
     });
+    ready = applySchema(sql).then(
+      () => sql,
+      (err) => {
+        ready = null; // retry on the next request
+        throw err;
+      },
+    );
   }
-  return sql;
+  return ready;
+}
+
+/**
+ * Create/upgrade the tables on first use, so a fresh database (e.g. Neon added
+ * from the Vercel dashboard) works without running any command. schema.sql is
+ * idempotent; the advisory lock stops concurrent cold starts from racing.
+ */
+async function applySchema(sql: Sql): Promise<void> {
+  const schema = await readFile(path.join(process.cwd(), "src/db/schema.sql"), "utf8");
+  await sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(727001)`;
+    await tx.unsafe(schema);
+  });
 }
 
 // Postgres.js returns loosely-typed rows; we map them explicitly below.
@@ -106,22 +133,22 @@ function rowToPostRank(r: Row): PostRankEntry {
 export function createPostgresStore(): Store {
   return {
     async getUserById(id) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`select * from users where id = ${id} limit 1`;
       return rows[0] ? rowToUser(rows[0]) : null;
     },
     async getUserByWallet(wallet) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`select * from users where wallet = ${wallet} limit 1`;
       return rows[0] ? rowToUser(rows[0]) : null;
     },
     async getUserByHandle(handle) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`select * from users where lower(handle) = ${handle.toLowerCase()} limit 1`;
       return rows[0] ? rowToUser(rows[0]) : null;
     },
     async createUser({ handle, wallet, bio = "", country = "FR" }) {
-      const db = getSql();
+      const db = await getSql();
       const id = randomUUID();
       const rows = await db`
         insert into users (id, handle, wallet, bio, country, created_at)
@@ -130,7 +157,7 @@ export function createPostgresStore(): Store {
       return rowToUser(rows[0]);
     },
     async updateUser(id, patch) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`
         update users set
           bio = coalesce(${patch.bio ?? null}, bio),
@@ -144,7 +171,7 @@ export function createPostgresStore(): Store {
     },
 
     async createPost({ userId, text, mediaUrl = null, mediaType = null, country = "FR", tags = [] }) {
-      const db = getSql();
+      const db = await getSql();
       const id = randomUUID();
       const rows = await db`
         insert into posts (id, user_id, text, media_url, media_type, created_at, country, tags)
@@ -167,7 +194,7 @@ export function createPostgresStore(): Store {
       };
     },
     async getPost(id) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`
         select p.*, u.id as author_id, u.handle as author_handle, u.wallet as author_wallet, u.bio as author_bio
         from posts p join users u on u.id = p.user_id
@@ -175,7 +202,7 @@ export function createPostgresStore(): Store {
       return rows[0] ? rowToPostWithAuthor(rows[0]) : null;
     },
     async listPosts(q: FeedQuery) {
-      const db = getSql();
+      const db = await getSql();
       const order =
         q.tab === "foryou"
           ? db`order by p.pumped desc`
@@ -192,7 +219,7 @@ export function createPostgresStore(): Store {
     },
 
     async recordPump({ postId, pumperUserId, amount, creatorAmount, founderAmount, signature, anonymous }) {
-      const db = getSql();
+      const db = await getSql();
       return db.begin(async (tx) => {
         const postRows = await tx`
           update posts set pumped = pumped + ${amount} where id = ${postId} returning *`;
@@ -228,12 +255,12 @@ export function createPostgresStore(): Store {
       });
     },
     async getPumpBySignature(signature) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`select * from pumps where signature = ${signature} limit 1`;
       return rows[0] ? rowToPump(rows[0]) : null;
     },
     async listPumpers(postId) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`
         select pm.*, u.id as author_id, u.handle as author_handle, u.wallet as author_wallet
         from pumps pm join users u on u.id = pm.pumper_user_id
@@ -248,7 +275,7 @@ export function createPostgresStore(): Store {
     },
 
     async addComment({ postId, userId, text }) {
-      const db = getSql();
+      const db = await getSql();
       const id = randomUUID();
       const rows = await db.begin(async (tx) => {
         const c = await tx`
@@ -268,7 +295,7 @@ export function createPostgresStore(): Store {
       };
     },
     async listComments(postId) {
-      const db = getSql();
+      const db = await getSql();
       const rows = await db`
         select c.*, u.id as author_id, u.handle as author_handle, u.wallet as author_wallet
         from comments c join users u on u.id = c.user_id
@@ -287,7 +314,7 @@ export function createPostgresStore(): Store {
     },
 
     async leaderboardPosts(q: LeaderboardQuery) {
-      const db = getSql();
+      const db = await getSql();
       if (!cursorIsUsable(q.cursor)) return [];
       const country = q.scope === "country" && q.country ? q.country : null;
       const c = q.cursor;
@@ -331,7 +358,7 @@ export function createPostgresStore(): Store {
       return rows.map(rowToPostRank);
     },
     async leaderboardCreators(q: LeaderboardQuery) {
-      const db = getSql();
+      const db = await getSql();
       if (!cursorIsUsable(q.cursor)) return [];
       const country = q.scope === "country" && q.country ? q.country : null;
       const c = q.cursor;

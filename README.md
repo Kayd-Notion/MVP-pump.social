@@ -14,7 +14,28 @@ créateurs). Ce dépôt porte le prototype `MVP.html` vers un vrai projet
 > que le programme on-chain n'est pas audité (cf. guide, Phases 2‑3). Basculer
 > plus tard = une variable d'env.
 
-## Démarrage
+## Le plus simple : en ligne, sans rien installer
+
+Le site est déployé par Vercel à chaque mise à jour de `main`
+(https://pump-social.vercel.app). Sans base de données, il tourne avec des
+données de démo qui **s'effacent** régulièrement. Pour garder tes posts et tes
+pumps, ajoute une base Postgres gratuite depuis le tableau de bord Vercel :
+
+1. [vercel.com](https://vercel.com) → projet **pump-social** → onglet **Storage**.
+2. **Create Database** → **Neon** (Serverless Postgres) → plan gratuit → région
+   Europe (Frankfurt) → **Create**, puis **Connect** au projet (tous les
+   environnements).
+3. Onglet **Deployments** → sur le dernier déploiement, **⋯ → Redeploy**.
+
+C'est tout : Vercel fournit `DATABASE_URL` au site, qui crée ses tables tout
+seul au premier chargement (feed vide au départ). Aucun terminal, aucun Docker.
+La base se consulte et se modifie dans le navigateur : Storage → ta base →
+**Open in Neon** → **SQL Editor**.
+
+Le backend Docker (`backend/`, section plus bas) reste disponible pour plus
+tard, mais il n'est pas nécessaire pour tester l'app.
+
+## Démarrage en local (développeurs)
 
 ```bash
 npm install
